@@ -1291,6 +1291,19 @@ const converters = {
                 meta.message.transition = meta.message.transition * 3.3;
             }
 
+            if (meta.mapped.model === 'GL-C-008-2ID' && utils.hasEndpoints(meta.device, [11, 13, 15])) {
+                // GL-C-008 RGB+CCT 2ID
+                // Brightness affects RGB endpoint only, white brightness is individually controlled by white_value
+                // State transitions affect both RGB and white endpoints
+                if (key === 'state') {
+                    let white_result = await converters.light_onoff_brightness.convertSet(meta.device.getEndpoint(15), key, value, meta);
+                    let rgb_result = await converters.light_onoff_brightness.convertSet(meta.device.getEndpoint(11), key, value, meta);
+                    let state = {...white_result.state, ...rgb_result.state}  // blind hack
+                    return {...white_result, ...{state: state}}  // TODO: look at states
+                }
+                entity = meta.device.getEndpoint(11);  // brightness changes only to RGB endpoint
+            }
+
             if (meta.mapped.model === 'GL-C-007' && utils.hasEndpoints(meta.device, [11, 13, 15])) {
                 // GL-C-007 RGBW
                 if (key === 'state' && value.toUpperCase() === 'OFF' && !meta.options.separate_control) {
@@ -1339,6 +1352,24 @@ const converters = {
             }
 
             const state = {};
+
+            if (meta.mapped.model === 'GL-C-008-2ID' && utils.hasEndpoints(meta.device, [11, 13, 15])) {
+                // white_value controls white endpoint brightness
+                // color_temp controls white endpoint temperature
+                // color controls rgb endpoint color
+                const white_entity = meta.device.getEndpoint(15);
+                const rgb_entity = meta.device.getEndpoint(11);
+                if (key === 'white_value') {
+                    let result = await converters.light_brightness.convertSet(white_entity, 'brightness', value, meta);
+                    result.state.white_value = result.state.brightness;
+                    delete result.state.brightness;
+                    return result;
+                } else if (key == 'color_temp' || key == 'color_temp_percent') {
+                    return await converters.light_colortemp.convertSet(white_entity, key, value, meta);
+                } else {
+                    return await converters.light_color.convertSet(rgb_entity, key, value, meta);
+                }
+            }
 
             if (meta.mapped.model === 'GL-C-007') {
                 // GL-C-007 RGBW
