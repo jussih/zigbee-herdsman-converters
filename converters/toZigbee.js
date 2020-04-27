@@ -1295,13 +1295,30 @@ const converters = {
                 // GL-C-008 RGB+CCT 2ID
                 // Brightness affects RGB endpoint only, white brightness is individually controlled by white_value
                 // State transitions affect both RGB and white endpoints
+                const white_entity = meta.device.getEndpoint(15);
+                const rgb_entity = meta.device.getEndpoint(11);
                 if (key === 'state') {
-                    let white_result = await converters.light_onoff_brightness.convertSet(meta.device.getEndpoint(15), key, value, meta);
-                    let rgb_result = await converters.light_onoff_brightness.convertSet(meta.device.getEndpoint(11), key, value, meta);
+                    if (meta.message && meta.message.hasOwnProperty('white_value')) {
+                        // Home assistant mqtt integration publishes "on" state along with brightness or white_value
+                        // This is needed so the other channel doesn't turn on when adjusting the other
+                        return await converters.light_onoff_brightness.convertSet(white_entity, key, value, meta);
+                    } else if (meta.message && meta.message.hasOwnProperty('brightness')) {
+                        return await converters.light_onoff_brightness.convertSet(rgb_entity, key, value, meta);
+                    }
+                    let white_result = await converters.light_onoff_brightness.convertSet(white_entity, key, value, meta);
+                    let rgb_result = await converters.light_onoff_brightness.convertSet(rgb_entity, key, value, meta);
                     let state = {...white_result.state, ...rgb_result.state}  // blind hack
                     return {...white_result, ...{state: state}}  // TODO: look at states
+                } else {
+                    if (key === 'brightness' && value === 1) {
+                        // Seems that home assistant brightness slider doesn't go below 1
+                        // This is a hack so the rgb leds turn off when the slider is moved all the way left
+                        value = 0;
+                    }
+                    const result = await converters.light_onoff_brightness.convertSet(rgb_entity, key, value, meta);
+                    delete result.state.state;  // do not turn ui state off if brightness goes to 0
+                    return result;
                 }
-                entity = meta.device.getEndpoint(11);  // brightness changes only to RGB endpoint
             }
 
             if (meta.mapped.model === 'GL-C-007' && utils.hasEndpoints(meta.device, [11, 13, 15])) {
@@ -1363,8 +1380,9 @@ const converters = {
                     let result = await converters.light_brightness.convertSet(white_entity, 'brightness', value, meta);
                     result.state.white_value = result.state.brightness;
                     delete result.state.brightness;
+                    delete result.state.state;  // do not turn off the whole device in the UI if white channel was turned off
                     return result;
-                } else if (key == 'color_temp' || key == 'color_temp_percent') {
+                } else if (key === 'color_temp' || key === 'color_temp_percent') {
                     return await converters.light_colortemp.convertSet(white_entity, key, value, meta);
                 } else {
                     return await converters.light_color.convertSet(rgb_entity, key, value, meta);
